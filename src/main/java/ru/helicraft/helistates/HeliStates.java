@@ -44,6 +44,10 @@ public final class HeliStates extends JavaPlugin {
 
         regionManager = new RegionManager(databaseManager, cfg);
 
+        if (Bukkit.getWorlds().isEmpty()) {
+            getLogger().warning("No worlds are loaded. Plugin cannot proceed.");
+            return;
+        }
         regionManager.loadRegions(world);
 
         var cmd = getCommand("helistates");
