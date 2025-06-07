@@ -49,7 +49,10 @@ public class RegionManager {
     private void saveRegions(World world) {
         try {
             Connection conn = databaseManager.getConnection();
-            if (conn == null) return;
+            if (conn == null) {
+                Bukkit.getLogger().warning("Failed to save regions: Database connection is null in saveRegions method.");
+                return;
+            }
             PreparedStatement ps = conn.prepareStatement(
                     "REPLACE INTO regions (id, world, min_x, min_z, max_x, max_z) VALUES (?,?,?,?,?,?)");
             for (RegionGenerator.Region reg : regions) {
