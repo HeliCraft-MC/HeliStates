@@ -17,6 +17,9 @@ public class DatabaseManager {
                     "CREATE TABLE IF NOT EXISTS regions (" +
                     "id VARCHAR(36) PRIMARY KEY," +
                     "world VARCHAR(64)," +
+                    "biome VARCHAR(64)," +
+                    "area INT," +
+                    "outline MEDIUMTEXT," +
                     "min_x INT," +
                     "min_z INT," +
                     "max_x INT," +

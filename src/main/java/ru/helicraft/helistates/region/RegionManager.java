@@ -2,6 +2,7 @@ package ru.helicraft.helistates.region;
 
 import org.bukkit.Bukkit;
 import org.bukkit.World;
+import org.bukkit.block.Biome;
 import org.bukkit.util.Vector;
 import ru.helicraft.helistates.database.DatabaseManager;
 import ru.helicraft.states.regions.RegionGenerator;
@@ -11,6 +12,7 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 public class RegionManager {
 
@@ -28,6 +30,35 @@ public class RegionManager {
     }
 
     /**
+     * Loads regions for the given world from the database.
+     */
+    public void loadRegions(World world) {
+        List<RegionGenerator.Region> list = new ArrayList<>();
+        try {
+            Connection conn = databaseManager.getConnection();
+            if (conn == null) return;
+            PreparedStatement ps = conn.prepareStatement(
+                    "SELECT id, biome, area, outline FROM regions WHERE world=?");
+            ps.setString(1, world.getName());
+            var rs = ps.executeQuery();
+            while (rs.next()) {
+                UUID id = UUID.fromString(rs.getString("id"));
+                String biomeName = rs.getString("biome");
+                int area = rs.getInt("area");
+                String outlineStr = rs.getString("outline");
+                List<Vector> outline = parseOutline(outlineStr);
+                Biome biome = Biome.valueOf(biomeName);
+                list.add(new RegionGenerator.Region(id, outline, area, biome));
+            }
+            rs.close();
+            ps.close();
+            regions = list;
+        } catch (SQLException | IllegalArgumentException e) {
+            Bukkit.getLogger().warning("Failed to load regions: " + e.getMessage());
+        }
+    }
+
+    /**
      * Starts asynchronous generation and saving of regions.
      */
     public void generateAndSave(World world, Runnable callback) {
@@ -41,11 +72,40 @@ public class RegionManager {
 
             @Override
             public void onError(Throwable t) {
-                HeliStates.getInstance().getLogger().warning("Region generation failed: " + t.getMessage());
-            }
-        });
+                    "REPLACE INTO regions (id, world, biome, area, outline, min_x, min_z, max_x, max_z) VALUES (?,?,?,?,?,?,?,?,?)");
+                ps.setString(3, reg.dominantBiome().toString());
+                ps.setInt(4, reg.areaBlocks());
+                ps.setString(5, outlineToString(reg.outline()));
+                ps.setInt(6, minX);
+                ps.setInt(7, minZ);
+                ps.setInt(8, maxX);
+                ps.setInt(9, maxZ);
+
+    private static String outlineToString(List<Vector> outline) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < outline.size(); i++) {
+            Vector v = outline.get(i);
+            sb.append(v.getBlockX()).append(',').append(v.getBlockZ());
+            if (i < outline.size() - 1) sb.append(';');
+        }
+        return sb.toString();
     }
 
+    private static List<Vector> parseOutline(String data) {
+        List<Vector> out = new ArrayList<>();
+        if (data == null || data.isEmpty()) return out;
+        String[] pairs = data.split(";");
+        for (String p : pairs) {
+            String[] parts = p.split(",");
+            if (parts.length != 2) continue;
+            try {
+                int x = Integer.parseInt(parts[0]);
+                int z = Integer.parseInt(parts[1]);
+                out.add(new Vector(x, 0, z));
+            } catch (NumberFormatException ignored) { }
+        }
+        return out;
+    }
     private void saveRegions(World world) {
         try {
             Connection conn = databaseManager.getConnection();

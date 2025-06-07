@@ -434,14 +434,16 @@ public final class RegionGenerator {
         cells.forEach(c -> S.add(((long)c.gx<<32)| (c.gz&0xffffffffL)));
 
         int[] dx = {1, 0, -1, 0}, dz = {0, 1, 0, -1};
-        Cell start = cells.get(0);
+        Cell start = cells.stream()
+                .min(Comparator.comparingInt(c -> c.gx * 100000 + c.gz))
+                .orElse(cells.get(0));
         int dir = 0;
         List<Vector> ring = new ArrayList<>();
         int x = start.gx, z = start.gz;
         int spacing = g.spacing;
 
         do {
-            ring.add(new Vector(start.toX(spacing), 0, start.toZ(spacing)));
+            ring.add(new Vector(x * spacing, 0, z * spacing));
             /* Поворачиваем пока слева внутри */
             for (int i = 0; i < 4; i++) {
                 int nd = (dir + 3) % 4;

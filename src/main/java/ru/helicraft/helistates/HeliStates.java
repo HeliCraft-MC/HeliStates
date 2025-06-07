@@ -5,6 +5,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.World;
 import org.bukkit.plugin.java.JavaPlugin;
 import ru.helicraft.helistates.database.DatabaseManager;
+import ru.helicraft.helistates.command.HeliCommand;
 import ru.helicraft.helistates.region.RegionManager;
 import ru.helicraft.states.regions.RegionGenerator;
 
@@ -43,7 +44,14 @@ public final class HeliStates extends JavaPlugin {
 
         regionManager = new RegionManager(databaseManager, cfg);
 
-        if (Bukkit.getWorlds().isEmpty()) {
+        regionManager.loadRegions(world);
+
+        var cmd = getCommand("helistates");
+        if (cmd != null) {
+            HeliCommand executor = new HeliCommand(regionManager);
+            cmd.setExecutor(executor);
+            cmd.setTabCompleter(executor);
+        }
             getLogger().warning("No worlds are loaded. Plugin cannot proceed.");
             return;
         }

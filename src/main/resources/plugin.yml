@@ -4,3 +4,7 @@ main: ru.helicraft.helistates.HeliStates
 api-version: '1.21'
 authors: [ ms0ur ]
 website: https://helicraft.ru
+commands:
+  helistates:
+    description: HeliStates management
+    usage: /<command> generate
