@@ -1,4 +1,5 @@
 enabled: false
+debug: false
 regions:
   worldRadius: 5000
   sampleSpacing: 8
@@ -9,5 +10,9 @@ regions:
   coastBuffer: 50
   chaikinIter: 3
 
-mysql:
-  connectionString: ''
+database:
+  type: sqlite        # sqlite | mysql
+  file: plugins/HeliStates/regions.db   # для SQLite
+  mysql:
+    connectionString: jdbc:mysql://user:pass@localhost:3306/helicraft
+

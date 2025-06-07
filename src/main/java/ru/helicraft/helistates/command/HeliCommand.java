@@ -2,43 +2,41 @@ package ru.helicraft.helistates.command;
 
 import org.bukkit.Bukkit;
 import org.bukkit.World;
-import org.bukkit.command.Command;
-import org.bukkit.command.CommandExecutor;
-import org.bukkit.command.CommandSender;
-import org.bukkit.command.TabCompleter;
+import org.bukkit.command.*;
 import org.bukkit.util.StringUtil;
 import ru.helicraft.helistates.region.RegionManager;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 
 public class HeliCommand implements CommandExecutor, TabCompleter {
 
-    private final RegionManager regionManager;
-
-    public HeliCommand(RegionManager manager) {
-        this.regionManager = manager;
-    }
+    private final RegionManager rm;
+    public HeliCommand(RegionManager rm){ this.rm=rm; }
 
     @Override
-    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (args.length > 0 && args[0].equalsIgnoreCase("generate")) {
-            sender.sendMessage("Starting region generation...");
-            World world = Bukkit.getWorlds().get(0);
-            regionManager.generateAndSave(world, () -> sender.sendMessage("Region generation finished."));
+    public boolean onCommand(CommandSender sender, Command cmd,
+                             String label, String[] args){
+
+        if(args.length>0 && args[0].equalsIgnoreCase("generate")){
+            sender.sendMessage("§7[HeliStates] §a⏳ Генерация началась…");
+            World world=Bukkit.getWorlds().get(0);
+
+            rm.generateAndSave(world,
+                    p-> sender.sendMessage("§7[HeliStates] §e"+p+"%"),
+                    ()->sender.sendMessage("§7[HeliStates] §a✔ Готово!")
+            );
             return true;
         }
-        sender.sendMessage("/" + label + " generate");
+        sender.sendMessage("/"+label+" generate");
         return true;
     }
 
     @Override
-    public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
-        if (args.length == 1) {
-            List<String> completions = new ArrayList<>();
-            StringUtil.copyPartialMatches(args[0], Collections.singletonList("generate"), completions);
-            return completions;
+    public List<String> onTabComplete(CommandSender s,Command c,String a,String[] args){
+        if(args.length==1){
+            List<String> list=new ArrayList<>();
+            StringUtil.copyPartialMatches(args[0], List.of("generate"), list);
+            return list;
         }
         return Collections.emptyList();
     }

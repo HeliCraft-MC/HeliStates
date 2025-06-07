@@ -15,15 +15,18 @@ import org.bukkit.HeightMap;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.Vector;
 import org.jetbrains.annotations.NotNull;
+import ru.helicraft.helistates.HeliStates;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.IntPredicate;
 import java.util.logging.Logger;
 
 /**
  * Основной сервис. Использовать через {@link #generate(World, Callback)}.
  */
+@SuppressWarnings("LanguageDetectionInspection")
 public final class RegionGenerator {
 
     /* ---------- Публичные типы ---------- */
@@ -37,6 +40,7 @@ public final class RegionGenerator {
     /** Callback, уведомляющий о завершении построения. */
     public interface Callback {
         void onFinished(List<Region> regions);
+        default void onProgress(int percent) {}
         default void onError(@NotNull Throwable t) { t.printStackTrace(); }
     }
 
@@ -119,7 +123,7 @@ public final class RegionGenerator {
     private void asyncGenerate(World w, Callback cb) {
         try {
             long t0 = System.currentTimeMillis();
-            Grid g = sampleWorld(w);
+            Grid g = sampleWorld(w, cb);
             buildWatersheds(g);
             thinSkeleton(g);
             List<Region> regions = postProcess(g, w);
@@ -137,36 +141,54 @@ public final class RegionGenerator {
 
     /* ---------- 1. Сбор карты высот ---------- */
 
-    private Grid sampleWorld(World w) {
-        int r = cfg.radiusBlocks;
+    private Grid sampleWorld(World w, Callback cb) {
+        int r       = cfg.radiusBlocks;
         int spacing = cfg.sampleSpacing;
-        int minX = -r, minZ = -r, maxX = r, maxZ = r;
-        int gw = (maxX - minX) / spacing + 1;
-        int gh = (maxZ - minZ) / spacing + 1;
-        Grid g = new Grid(gw, gh, spacing);
+        int minX    = -r, minZ = -r, maxX = r, maxZ = r;
+        int gw      = (maxX - minX) / spacing + 1;
+        int gh      = (maxZ - minZ) / spacing + 1;
+        Grid g      = new Grid(gw, gh, spacing);
 
         log.info("Sampling heightmap...");
+        // для всех задач
         List<CompletableFuture<?>> futures = new ArrayList<>(gw * gh);
+        AtomicInteger done = new AtomicInteger(0);
+        int total = gw * gh;
+
         for (int gx = 0; gx < gw; gx++) {
             for (int gz = 0; gz < gh; gz++) {
-                int cellX = gx;
-                int cellZ = gz;
+                int cellX = gx, cellZ = gz;
                 int wx = minX + cellX * spacing;
                 int wz = minZ + cellZ * spacing;
+
                 CompletableFuture<Void> f = new CompletableFuture<>();
                 w.getChunkAtAsync(wx >> 4, wz >> 4, true, true, chunk -> {
+                    // ваш старый код
                     ChunkSnapshot snap = chunk.getChunkSnapshot();
                     int y = snap.getHighestBlockYAt(wx & 15, wz & 15);
                     g.height[cellX][cellZ] = y;
                     g.biome[cellX][cellZ]  = snap.getBiome(wx & 15, 64, wz & 15);
+
+                    // НОВОЕ: считаем % и раз в 5% отсылаем в колбэк на основном потоке
+                    int p = done.incrementAndGet() * 100 / total;
+                    if (p % 5 == 0) {
+                        Bukkit.getScheduler().runTask(
+                                HeliStates.getInstance(),
+                                () -> cb.onProgress(p)
+                        );
+                    }
+
                     f.complete(null);
                 });
                 futures.add(f);
             }
         }
+
+        // ждём окончания всех CompletableFuture
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
         return g;
     }
+
 
     /* ---------- 2. Watershed + Ridge пометка ---------- */
 
