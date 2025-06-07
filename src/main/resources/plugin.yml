@@ -1,0 +1,6 @@
+name: HeliStates
+version: '1.0-SNAPSHOT'
+main: ru.helicraft.helistates.HeliStates
+api-version: '1.21'
+authors: [ ms0ur ]
+website: https://helicraft.ru
