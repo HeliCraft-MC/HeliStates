@@ -41,7 +41,7 @@ public class RegionManager {
 
             @Override
             public void onError(Throwable t) {
-                Bukkit.getLogger().warning("Region generation failed: " + t.getMessage());
+                HeliStates.getInstance().getLogger().warning("Region generation failed: " + t.getMessage());
             }
         });
     }
