@@ -1,6 +1,13 @@
 enabled: false
 regions:
   worldRadius: 5000
+  sampleSpacing: 8
+  terrainWeight: 1.0
+  biomeWeight: 0.4
+  minCells: 30
+  maxCells: 3000
+  coastBuffer: 50
+  chaikinIter: 3
 
 mysql:
   connectionString: ''
