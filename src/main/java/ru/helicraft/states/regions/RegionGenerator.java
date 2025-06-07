@@ -11,13 +11,13 @@ package ru.helicraft.states.regions;
 
 import org.bukkit.*;
 import org.bukkit.block.Biome;
+import org.bukkit.HeightMap;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.Vector;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.IntPredicate;
 import java.util.logging.Logger;
 
@@ -97,8 +97,6 @@ public final class RegionGenerator {
 
     private final Config cfg;
     private final Logger log = Bukkit.getLogger();
-    private static final ForkJoinPool POOL = new ForkJoinPool(
-            Math.max(2, Runtime.getRuntime().availableProcessors() - 1));
 
     /* ---------- ctor ---------- */
 
@@ -148,18 +146,25 @@ public final class RegionGenerator {
         Grid g = new Grid(gw, gh, spacing);
 
         log.info("Sampling heightmap...");
-        POOL.submit(() ->
-            Arrays.stream(new int[gw * gh]).parallel().forEach(idx -> {
-                int gx = idx % gw;
-                int gz = idx / gw;
-                int wx = minX + gx * spacing;
-                int wz = minZ + gz * spacing;
-                ChunkSnapshot snap = w.getChunkAt(wx >> 4, wz >> 4).getChunkSnapshot();
-                int y = snap.getHighestBlockYAt(wx & 15, wz & 15);
-                g.height[gx][gz] = y;
-                g.biome[gx][gz]  = snap.getBiome(wx & 15, 64, wz & 15);
-            })
-        ).join();
+        List<CompletableFuture<?>> futures = new ArrayList<>(gw * gh);
+        for (int gx = 0; gx < gw; gx++) {
+            for (int gz = 0; gz < gh; gz++) {
+                int cellX = gx;
+                int cellZ = gz;
+                int wx = minX + cellX * spacing;
+                int wz = minZ + cellZ * spacing;
+                CompletableFuture<Void> f = new CompletableFuture<>();
+                w.getChunkAtAsync(wx >> 4, wz >> 4, true, true, chunk -> {
+                    ChunkSnapshot snap = chunk.getChunkSnapshot();
+                    int y = snap.getHighestBlockYAt(wx & 15, wz & 15);
+                    g.height[cellX][cellZ] = y;
+                    g.biome[cellX][cellZ]  = snap.getBiome(wx & 15, 64, wz & 15);
+                    f.complete(null);
+                });
+                futures.add(f);
+            }
+        }
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
         return g;
     }
 
@@ -408,10 +413,7 @@ public final class RegionGenerator {
         return out;
     }
 
-    private static boolean isOcean(Biome biome) {
-        String name = biome.toString().toLowerCase(Locale.ROOT);
-        return name.contains("ocean");
-    }
+
 
     /* ---------- Chaikin smoothing ---------- */
 
@@ -455,5 +457,10 @@ public final class RegionGenerator {
         } while (!(x == start.gx && z == start.gz && ring.size() > 1));
 
         return ring;
+    }
+
+    private static boolean isOcean(Biome biome) {
+        String name = biome.toString().toLowerCase(Locale.ROOT);
+        return name.contains("ocean");
     }
 }

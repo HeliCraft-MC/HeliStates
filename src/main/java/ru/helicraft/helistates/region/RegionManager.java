@@ -5,10 +5,12 @@ import org.bukkit.World;
 import org.bukkit.block.Biome;
 import org.bukkit.util.Vector;
 import ru.helicraft.helistates.database.DatabaseManager;
+import ru.helicraft.helistates.HeliStates;
 import ru.helicraft.states.regions.RegionGenerator;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.util.concurrent.CompletableFuture;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
@@ -66,8 +68,13 @@ public class RegionManager {
             @Override
             public void onFinished(List<RegionGenerator.Region> result) {
                 regions = result;
-                saveRegions(world);
-                if (callback != null) callback.run();
+                CompletableFuture.runAsync(() -> saveRegions(world))
+                        .whenComplete((v, t) -> {
+                            if (t != null) {
+                                Bukkit.getLogger().warning("Failed to save regions: " + t.getMessage());
+                            }
+                            if (callback != null) Bukkit.getScheduler().runTask(HeliStates.getInstance(), callback);
+                        });
             }
 
             @Override
@@ -82,27 +89,32 @@ public class RegionManager {
                 ps.setInt(9, maxZ);
 
     private static String outlineToString(List<Vector> outline) {
-        StringBuilder sb = new StringBuilder();
+        StringBuilder sb = new StringBuilder("[");
         for (int i = 0; i < outline.size(); i++) {
             Vector v = outline.get(i);
-            sb.append(v.getBlockX()).append(',').append(v.getBlockZ());
-            if (i < outline.size() - 1) sb.append(';');
+            sb.append('[').append(v.getBlockX()).append(',').append(v.getBlockZ()).append(']');
+            if (i < outline.size() - 1) sb.append(',');
         }
+        sb.append(']');
         return sb.toString();
     }
 
     private static List<Vector> parseOutline(String data) {
         List<Vector> out = new ArrayList<>();
-        if (data == null || data.isEmpty()) return out;
-        String[] pairs = data.split(";");
+        if (data == null || data.length() < 2) return out;
+        String content = data.substring(1, data.length() - 1);
+        if (content.isEmpty()) return out;
+        String[] pairs = content.split("\\],\\[");
         for (String p : pairs) {
-            String[] parts = p.split(",");
+            String cleaned = p.replace("[", "").replace("]", "");
+            String[] parts = cleaned.split(",");
             if (parts.length != 2) continue;
             try {
-                int x = Integer.parseInt(parts[0]);
-                int z = Integer.parseInt(parts[1]);
+                int x = Integer.parseInt(parts[0].trim());
+                int z = Integer.parseInt(parts[1].trim());
                 out.add(new Vector(x, 0, z));
-            } catch (NumberFormatException ignored) { }
+            } catch (NumberFormatException ignored) {
+            }
         }
         return out;
     }

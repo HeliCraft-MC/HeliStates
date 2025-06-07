@@ -19,11 +19,12 @@ public class DatabaseManager {
                     "world VARCHAR(64)," +
                     "biome VARCHAR(64)," +
                     "area INT," +
-                    "outline MEDIUMTEXT," +
+                    "outline JSON," +
                     "min_x INT," +
                     "min_z INT," +
                     "max_x INT," +
-                    "max_z INT" +
+                    "max_z INT," +
+                    "INDEX world_bounds (world, min_x, max_x, min_z, max_z)" +
                     ")"
             );
         }
