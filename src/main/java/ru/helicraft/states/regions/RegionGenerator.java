@@ -13,14 +13,18 @@ import org.bukkit.*;
 import org.bukkit.block.Biome;
 import org.bukkit.HeightMap;
 import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.util.Vector;
 import org.jetbrains.annotations.NotNull;
 import ru.helicraft.helistates.HeliStates;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.IntPredicate;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
@@ -58,6 +62,9 @@ public final class RegionGenerator {
 
         /** Вес различия биомов (меньше рельефа). */
         public double BIOME_WEIGHT = 0.4;
+
+        /** Максимальное число одновременно загружаемых чанков. */
+        public int maxParallelSamples = Runtime.getRuntime().availableProcessors() * 2;
 
         /** Мин. и макс. размер клеток в регионе до мержа / сплита */
         public int MIN_CELLS = 30;
@@ -99,8 +106,8 @@ public final class RegionGenerator {
 
     /* ---------- Поля ---------- */
 
+    private static final Logger LOG = JavaPlugin.getPlugin(HeliStates.class).getLogger();
     private final Config cfg;
-    private final Logger log = Bukkit.getLogger();
 
     /* ---------- ctor ---------- */
 
@@ -123,12 +130,18 @@ public final class RegionGenerator {
     private void asyncGenerate(World w, Callback cb) {
         try {
             long t0 = System.currentTimeMillis();
+            if (HeliStates.DEBUG) LOG.info("[DEBUG] starting generation for " + w.getName());
+
             Grid g = sampleWorld(w, cb);
+            if (HeliStates.DEBUG) LOG.info("[DEBUG] building watersheds");
             buildWatersheds(g);
+            if (HeliStates.DEBUG) LOG.info("[DEBUG] thinning skeleton");
             thinSkeleton(g);
+            if (HeliStates.DEBUG) LOG.info("[DEBUG] post-processing");
             List<Region> regions = postProcess(g, w);
-            log.info("Region generation finished in " +
-                     (System.currentTimeMillis() - t0) + " ms; regions: " + regions.size());
+
+            long dt = System.currentTimeMillis() - t0;
+            LOG.info("Region generation finished in " + dt + " ms; regions: " + regions.size());
             Bukkit.getScheduler().runTask(
                     Bukkit.getPluginManager().getPlugin("HeliStates"),
                     () -> cb.onFinished(Collections.unmodifiableList(regions)));
@@ -149,43 +162,86 @@ public final class RegionGenerator {
         int gh      = (maxZ - minZ) / spacing + 1;
         Grid g      = new Grid(gw, gh, spacing);
 
-        log.info("Sampling heightmap...");
-        // для всех задач
-        List<CompletableFuture<?>> futures = new ArrayList<>(gw * gh);
+        LOG.info("Sampling heightmap...");
+        long tStart = System.currentTimeMillis();
+
+        if (HeliStates.DEBUG) {
+            Runtime rt = Runtime.getRuntime();
+            LOG.info("[DEBUG] Grid size: " + gw + "×" + gh + " → " + ((long) gw * gh) + " cells");
+            LOG.info("[DEBUG] Memory before sampling: free=" + rt.freeMemory()
+                    + " total=" + rt.totalMemory()
+                    + " max=" + rt.maxMemory());
+        }
+
         AtomicInteger done = new AtomicInteger(0);
         int total = gw * gh;
 
+        int step = Math.max(1, total / 20); // progress every ~5%
+
+        int concurrency = cfg.maxParallelSamples > 0 ? cfg.maxParallelSamples : Runtime.getRuntime().availableProcessors() * 2;
+        if (HeliStates.DEBUG) {
+            LOG.info("[DEBUG] Concurrency limit (semaphore permits): " + concurrency);
+        }
+        Semaphore sem = new Semaphore(concurrency);
+        List<CompletableFuture<Void>> futures = new ArrayList<>(total);
+
         for (int gx = 0; gx < gw; gx++) {
             for (int gz = 0; gz < gh; gz++) {
+                try {
+                    sem.acquire();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("Interrupted while acquiring semaphore", e);
+                }
+
                 int cellX = gx, cellZ = gz;
                 int wx = minX + cellX * spacing;
                 int wz = minZ + cellZ * spacing;
 
                 CompletableFuture<Void> f = new CompletableFuture<>();
                 w.getChunkAtAsync(wx >> 4, wz >> 4, true, true, chunk -> {
-                    // ваш старый код
-                    ChunkSnapshot snap = chunk.getChunkSnapshot();
-                    int y = snap.getHighestBlockYAt(wx & 15, wz & 15);
-                    g.height[cellX][cellZ] = y;
-                    g.biome[cellX][cellZ]  = snap.getBiome(wx & 15, 64, wz & 15);
-
-                    // НОВОЕ: считаем % и раз в 5% отсылаем в колбэк на основном потоке
-                    int p = done.incrementAndGet() * 100 / total;
-                    if (p % 5 == 0) {
-                        Bukkit.getScheduler().runTask(
-                                HeliStates.getInstance(),
-                                () -> cb.onProgress(p)
-                        );
+                    try {
+                        ChunkSnapshot snap = chunk.getChunkSnapshot(false, true, true);
+                        int y = snap.getHighestBlockYAt(wx & 15, wz & 15);
+                        g.height[cellX][cellZ] = y;
+                        g.biome[cellX][cellZ] = snap.getBiome(wx & 15, 64, wz & 15);
+                    } catch (Throwable ex) {
+                        if (HeliStates.DEBUG) {
+                            LOG.log(Level.SEVERE, "[DEBUG] Error at cell (" + cellX + "," + cellZ + ")", ex);
+                        }
+                    } finally {
+                        int curr = done.incrementAndGet();
+                        if (curr % step == 0) {
+                            int percent = curr * 100 / total;
+                            if (HeliStates.DEBUG) {
+                                LOG.info("[DEBUG] Sampled " + curr + " / " + total + " (" + percent + "%)");
+                            } else {
+                                Bukkit.getScheduler().runTask(
+                                        HeliStates.getInstance(),
+                                        () -> cb.onProgress(percent)
+                                );
+                            }
+                        }
+                        sem.release();
+                        f.complete(null);
                     }
-
-                    f.complete(null);
                 });
                 futures.add(f);
             }
         }
 
-        // ждём окончания всех CompletableFuture
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+
+        Bukkit.getScheduler().runTask(HeliStates.getInstance(), () -> cb.onProgress(100));
+
+        if (HeliStates.DEBUG) {
+            long elapsed = System.currentTimeMillis() - tStart;
+            Runtime rt = Runtime.getRuntime();
+            LOG.info("[DEBUG] Sampling finished in " + elapsed + " ms");
+            LOG.info("[DEBUG] Memory after sampling: free=" + rt.freeMemory()
+                    + " total=" + rt.totalMemory());
+        }
+
         return g;
     }
 

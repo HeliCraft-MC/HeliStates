@@ -4,6 +4,7 @@ import lombok.Getter;
 import org.bukkit.Bukkit;
 import org.bukkit.World;
 import org.bukkit.block.Biome;
+import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.util.Vector;
 import ru.helicraft.helistates.HeliStates;
 import ru.helicraft.helistates.database.DatabaseManager;
@@ -12,7 +13,10 @@ import ru.helicraft.states.regions.RegionGenerator;
 import java.sql.*;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Загружает и генерирует регионы, сохраняет их в БД
@@ -20,6 +24,8 @@ import java.util.function.Consumer;
  */
 @SuppressWarnings("SqlResolve")
 public class RegionManager {
+
+    private static final Logger LOG = JavaPlugin.getPlugin(HeliStates.class).getLogger();
 
     /* ---------- SQL ---------- */
     private static final String SELECT_SQL =
@@ -75,12 +81,14 @@ public class RegionManager {
             regions = list;
             notifyListeners();
         } catch (SQLException | IllegalArgumentException ex) {
-            Bukkit.getLogger().warning("Failed to load regions: " + ex.getMessage());
+            LOG.warning("Failed to load regions: " + ex.getMessage());
         }
     }
 
     /* ---------- Генерация ---------- */
     public void generateAndSave(World world, Consumer<Integer> onProgress, Runnable whenDone) {
+        if (HeliStates.DEBUG)
+            LOG.info("[DEBUG] starting generation for world " + world.getName());
         generator.generate(world, new RegionGenerator.Callback() {
 
             @Override public void onProgress(int p){
@@ -96,7 +104,7 @@ public class RegionManager {
                                 Bukkit.getScheduler().runTask(
                                         HeliStates.getInstance(), () -> {
                                             if (err != null)
-                                                Bukkit.getLogger().warning(
+                                                LOG.warning(
                                                         "Failed to save regions: " + err);
                                             notifyListeners();
                                             if (whenDone != null) whenDone.run();
@@ -105,17 +113,18 @@ public class RegionManager {
 
             @Override
             public void onError(Throwable t) {
-                Bukkit.getLogger().warning(
-                        "Region generation failed: " + t.getMessage());
+                LOG.log(Level.SEVERE, "Region generation failed", t);
             }
         });
     }
 
     /* ---------- Сохранение ---------- */
     private void saveRegions(World world) {
+        if (HeliStates.DEBUG)
+            LOG.info("[DEBUG] saving regions to DB");
         Connection conn = databaseManager.getConnection();
         if (conn == null) {
-            Bukkit.getLogger().warning("DB connection is null; abort save.");
+            LOG.warning("DB connection is null; abort save.");
             return;
         }
         try (PreparedStatement ps = conn.prepareStatement(UPSERT_SQL)) {
@@ -135,9 +144,11 @@ public class RegionManager {
             conn.commit();
         } catch (SQLException ex) {
             try { conn.rollback(); } catch (SQLException ignore) {}
-            Bukkit.getLogger().warning("Failed to save regions: " + ex.getMessage());
+            LOG.warning("Failed to save regions: " + ex.getMessage());
         } finally {
             try { conn.setAutoCommit(true); } catch (SQLException ignore) {}
+            if (HeliStates.DEBUG)
+                LOG.info("[DEBUG] region save completed");
         }
     }
 
@@ -177,4 +188,18 @@ public class RegionManager {
         return new BoundingBox(minX, minZ, maxX, maxZ);
     }
     private record BoundingBox(int minX, int minZ, int maxX, int maxZ) {}
+
+    /** Останавливает фоновые задачи и пул БД. */
+    public void shutdown() {
+        dbPool.shutdown();
+        try {
+            if (!dbPool.awaitTermination(5, TimeUnit.SECONDS)) {
+                LOG.warning("DB pool did not terminate in time");
+                dbPool.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            dbPool.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+    }
 }

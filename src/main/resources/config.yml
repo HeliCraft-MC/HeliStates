@@ -9,6 +9,7 @@ regions:
   maxCells: 3000
   coastBuffer: 50
   chaikinIter: 3
+  maxParallelSamples: 0  # 0 => use CPU x2
 
 database:
   type: sqlite        # sqlite | mysql
