@@ -201,7 +201,7 @@ public final class RegionGenerator {
                 CompletableFuture<Void> f = new CompletableFuture<>();
                 w.getChunkAtAsync(wx >> 4, wz >> 4, true, true, chunk -> {
                     try {
-                        ChunkSnapshot snap = chunk.getChunkSnapshot(false, true, true);
+                        ChunkSnapshot snap = chunk.getChunkSnapshot(true, true, true);
                         int y = snap.getHighestBlockYAt(wx & 15, wz & 15);
                         g.height[cellX][cellZ] = y;
                         g.biome[cellX][cellZ] = snap.getBiome(wx & 15, 64, wz & 15);
