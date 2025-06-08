@@ -6,23 +6,15 @@ regions:
   worldRadius: 5000
   # Height-map sampling step in blocks. Lower values give more precise
   # regions but slow generation.
-  sampleSpacing: 8
-  steepSlope: 10
+  sampleSpacing: 32
+  slopeExtra: 2
   # Region size thresholds used when merging and splitting.
-  minCells: 400
-  maxCells: 3000
-  # Chaikin smoothing iterations. More iterations produce smoother
-  # polygons but require extra processing time.
-  chaikinIter: 2
+  minCells: 300
+  maxCells: 1500
   # Maximum simultaneously sampled chunks. Set to 0 to use CPU x2.
   maxParallelSamples: 0  # 0 => use CPU x2
-  similarBiomes:
-    forest_family:
-      - FOREST
-      - BIRCH_FOREST
-    jungle_family:
-      - JUNGLE
-      - SPARSE_JUNGLE
+  # Timeout for asynchronous chunk loading, seconds
+  chunkTimeout: 40
 
 database:
   type: sqlite        # sqlite | mysql

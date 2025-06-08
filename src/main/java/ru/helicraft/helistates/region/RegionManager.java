@@ -8,7 +8,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.util.Vector;
 import ru.helicraft.helistates.HeliStates;
 import ru.helicraft.helistates.database.DatabaseManager;
-import ru.helicraft.states.regions.RegionGenerator;
+import ru.helicraft.states.regions.SimpleRegionGenerator;
 
 import java.sql.*;
 import java.util.*;
@@ -37,26 +37,26 @@ public class RegionManager {
 
     /* ---------- Поля ---------- */
     private final DatabaseManager databaseManager;
-    private final RegionGenerator generator;
+    private final SimpleRegionGenerator generator;
     private final ExecutorService dbPool =
             Executors.newSingleThreadExecutor(r -> new Thread(r, "HeliStates-DB"));
 
-    private final List<Consumer<List<RegionGenerator.Region>>> listeners =
+    private final List<Consumer<List<SimpleRegionGenerator.Region>>> listeners =
             new CopyOnWriteArrayList<>();
 
     @Getter
-    private volatile List<RegionGenerator.Region> regions = Collections.emptyList();
+    private volatile List<SimpleRegionGenerator.Region> regions = Collections.emptyList();
     @Getter
     private volatile World world;
 
     /* ---------- ctor ---------- */
-    public RegionManager(DatabaseManager db, RegionGenerator.Config cfg) {
+    public RegionManager(DatabaseManager db, SimpleRegionGenerator.Config cfg) {
         this.databaseManager = db;
-        this.generator       = new RegionGenerator(cfg);
+        this.generator       = new SimpleRegionGenerator(cfg);
     }
 
     /* ---------- Подписка ---------- */
-    public void addUpdateListener(Consumer<List<RegionGenerator.Region>> l) {
+    public void addUpdateListener(Consumer<List<SimpleRegionGenerator.Region>> l) {
         listeners.add(l);
         l.accept(regions); // сразу отдаём текущее состояние
     }
@@ -67,7 +67,7 @@ public class RegionManager {
     /* ---------- Загрузка ---------- */
     public void loadRegions(World world) {
         this.world = world;
-        List<RegionGenerator.Region> list = new ArrayList<>();
+        List<SimpleRegionGenerator.Region> list = new ArrayList<>();
         try (PreparedStatement ps =
                      databaseManager.getConnection().prepareStatement(SELECT_SQL)) {
             ps.setString(1, world.getName());
@@ -78,7 +78,7 @@ public class RegionManager {
                     Biome bio  = org.bukkit.Registry.BIOME.get(org.bukkit.NamespacedKey.minecraft(rs.getString("biome").toLowerCase()));
                     double area = rs.getDouble("area");
                     List<Vector> outline = parseOutline(rs.getString("outline"));
-                    list.add(new RegionGenerator.Region(id, outline, area, bio));
+                    list.add(new SimpleRegionGenerator.Region(id, outline, area, bio));
                 }
             }
             regions = list;
@@ -93,14 +93,14 @@ public class RegionManager {
         if (HeliStates.DEBUG)
             LOG.info("[DEBUG] starting generation for world " + world.getName());
         this.world = world;
-        generator.generate(world, new RegionGenerator.Callback() {
+        generator.generate(world, new SimpleRegionGenerator.Callback() {
 
             @Override public void onProgress(int p){
                 if(onProgress!=null) onProgress.accept(p);
             }
 
             @Override
-            public void onFinished(List<RegionGenerator.Region> result) {
+            public void onFinished(List<SimpleRegionGenerator.Region> result) {
                 regions = result;
                 CompletableFuture
                         .runAsync(() -> saveRegions(world), dbPool)
@@ -133,7 +133,7 @@ public class RegionManager {
         }
         try (PreparedStatement ps = conn.prepareStatement(UPSERT_SQL)) {
             conn.setAutoCommit(false);
-            for (RegionGenerator.Region r : regions) {
+            for (SimpleRegionGenerator.Region r : regions) {
                 BoundingBox b = bbox(r.outline());
                 ps.setString(1, r.id().toString());
                 ps.setString(2, world.getName());

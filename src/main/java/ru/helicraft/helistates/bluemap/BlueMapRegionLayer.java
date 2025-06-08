@@ -11,7 +11,7 @@ import de.bluecolored.bluemap.api.math.Shape;
 import org.bukkit.Bukkit;
 import org.bukkit.World;
 import ru.helicraft.helistates.region.RegionManager;
-import ru.helicraft.states.regions.RegionGenerator;
+import ru.helicraft.states.regions.SimpleRegionGenerator;
 
 import java.util.List;
 
@@ -52,7 +52,7 @@ public final class BlueMapRegionLayer {
     }
 
     /* перерисовать все регионы */
-    private void renderRegions(List<RegionGenerator.Region> regs) {
+    private void renderRegions(List<SimpleRegionGenerator.Region> regs) {
         Bukkit.getScheduler().runTask(ru.helicraft.helistates.HeliStates.getInstance(), () -> {
             set.getMarkers().clear();
             regs.forEach(r -> {
@@ -62,7 +62,7 @@ public final class BlueMapRegionLayer {
         });
     }
 
-    private ShapeMarker buildMarker(RegionGenerator.Region r) {
+    private ShapeMarker buildMarker(SimpleRegionGenerator.Region r) {
         World world = regionManager.getWorld();
         if (world == null) return null;
 
