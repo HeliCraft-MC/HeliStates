@@ -73,7 +73,7 @@ public final class BlueMapRegionLayer {
 
         double cx = poly.stream().mapToDouble(Vector2d::getX).average().orElse(0);
         double cz = poly.stream().mapToDouble(Vector2d::getY).average().orElse(0);
-        int y = world.getHighestBlockYAt((int) cx, (int) cz) + 1;
+        int y = world.getMaxHeight() - 1;
 
         return ShapeMarker.builder()
                 .label("Незанятый регион")
