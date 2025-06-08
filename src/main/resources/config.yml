@@ -7,21 +7,22 @@ regions:
   # Height-map sampling step in blocks. Lower values give more precise
   # regions but slow generation.
   sampleSpacing: 8
-  terrainWeight: 1.0
-  biomeWeight: 0.4
+  steepSlope: 10
   # Region size thresholds used when merging and splitting.
-  minCells: 30
+  minCells: 400
   maxCells: 3000
-  # Distance from shore kept when discarding ocean regions.
-  coastBuffer: 50
   # Chaikin smoothing iterations. More iterations produce smoother
   # polygons but require extra processing time.
-  chaikinIter: 3
-  # Limit for steps during boundary tracing expressed as multiplier of
-  # region cell count.
-  boundaryStepLimitFactor: 8
+  chaikinIter: 2
   # Maximum simultaneously sampled chunks. Set to 0 to use CPU x2.
   maxParallelSamples: 0  # 0 => use CPU x2
+  similarBiomes:
+    forest_family:
+      - FOREST
+      - BIRCH_FOREST
+    jungle_family:
+      - JUNGLE
+      - SPARSE_JUNGLE
 
 database:
   type: sqlite        # sqlite | mysql
