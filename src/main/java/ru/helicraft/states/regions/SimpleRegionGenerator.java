@@ -122,7 +122,7 @@ public final class SimpleRegionGenerator {
                                 Biome b=s.getBiome(lx,64,lz);
                                 g.biome[idx][idz]=b;
                                 g.water[idx][idz]=isWater(b);
-                            }catch(Throwable ex){LOG.log(Level.SEVERE,"sample error",ex);}finally{
+                            }catch(Throwable ex){LOG.log(Level.SEVERE,"sample error at coordinates (wx=" + wx + ", wz=" + wz + ")",ex);}finally{
                                 int cur=done.incrementAndGet();
                                 int pct=cur*100/total;
                                 if(pct!=last[0]){ last[0]=pct; cb.onProgress(pct); }
