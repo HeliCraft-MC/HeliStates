@@ -25,6 +25,11 @@ dependencies {
     compileOnly("com.mysql:mysql-connector-j:9.3.0")
     compileOnly 'de.bluecolored:bluemap-api:2.7.4'
     implementation 'org.xerial:sqlite-jdbc:3.46.0.0'
+
+    testImplementation("io.papermc.paper:paper-api:1.21.5-R0.1-SNAPSHOT")
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
 tasks {
@@ -52,6 +57,10 @@ tasks.withType(JavaCompile).configureEach {
     if (targetJavaVersion >= 10 || JavaVersion.current().isJava10Compatible()) {
         options.release.set(targetJavaVersion)
     }
+}
+
+test {
+    useJUnitPlatform()
 }
 
 processResources {

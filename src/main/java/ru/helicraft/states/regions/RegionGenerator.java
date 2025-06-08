@@ -77,6 +77,16 @@ public final class RegionGenerator {
         public int CHAIKIN_ITER = 3;
     }
 
+    /**
+     * Calculates effective concurrency limit.
+     * @param configured value from config; {@code 0} or negative means CPU x2
+     * @param cpus available processors
+     */
+    static int computeConcurrency(int configured, int cpus) {
+        int base = configured > 0 ? configured : cpus * 2;
+        return Math.max(1, base);
+    }
+
     /* ---------- Внутренние структуры ---------- */
 
     private record Cell(int gx, int gz) {
@@ -106,7 +116,7 @@ public final class RegionGenerator {
 
     /* ---------- Поля ---------- */
 
-    private static final Logger LOG = JavaPlugin.getPlugin(HeliStates.class).getLogger();
+    private static final Logger LOG = Logger.getLogger(RegionGenerator.class.getName());
     private final Config cfg;
 
     /* ---------- ctor ---------- */
@@ -178,7 +188,8 @@ public final class RegionGenerator {
 
         int step = Math.max(1, total / 20); // progress every ~5%
 
-        int concurrency = cfg.maxParallelSamples > 0 ? cfg.maxParallelSamples : Runtime.getRuntime().availableProcessors() * 2;
+        int concurrency = computeConcurrency(cfg.maxParallelSamples,
+                Runtime.getRuntime().availableProcessors());
         if (HeliStates.DEBUG) {
             LOG.info("[DEBUG] Concurrency limit (semaphore permits): " + concurrency);
         }
@@ -410,8 +421,10 @@ public final class RegionGenerator {
                     for (int dx1 = -1; dx1 <= 1; dx1++)
                         for (int dz1 = -1; dz1 <= 1; dz1++) {
                             int nx = c.gx + dx1, nz = c.gz + dz1;
-                            if (!g.inside(nx, nz) || region[nx][nz] == id) continue;
-                            border.merge(region[nx][nz],1,Integer::sum);
+                            if (!g.inside(nx, nz)) continue;
+                            int rid = region[nx][nz];
+                            if (rid < 0 || rid == id) continue; // skip ridges or self
+                            border.merge(rid, 1, Integer::sum);
                         }
                 }
                 if (border.isEmpty()) continue;
@@ -419,7 +432,7 @@ public final class RegionGenerator {
                         Map.Entry.comparingByValue()).getKey();
                 /* Перекрашиваем */
                 e.getValue().forEach(c -> region[c.gx][c.gz] = tgt);
-                regCells.get(tgt).addAll(e.getValue());
+                regCells.computeIfAbsent(tgt, k -> new ArrayList<>()).addAll(e.getValue());
                 it.remove();
                 merged = true;
                 break;
