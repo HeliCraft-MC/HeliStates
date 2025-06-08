@@ -94,16 +94,14 @@ public final class RegionGenerator {
         }
         boolean inside(int q,int r){return q>=0&&r>=0&&q<w&&r<h;}
 
-        /** World X coordinate of cell center */
-        double worldX(int q, int r){
-            int aq=q+minQ, ar=r+minR;
-            return Math.sqrt(3.0) * hexSize * (aq + ar/2.0);
+        /** World X coordinate of cell center (absolute axial coords) */
+        double worldX(int absQ, int absR){
+            return Math.sqrt(3.0) * hexSize * (absQ + absR / 2.0);
         }
 
-        /** World Z coordinate of cell center */
-        double worldZ(int q, int r){
-            int aq=q+minQ, ar=r+minR;
-            return 1.5 * hexSize * ar;
+        /** World Z coordinate of cell center (absolute axial coords) */
+        double worldZ(int absR){
+            return 1.5 * hexSize * absR;
         }
     }
 
@@ -175,7 +173,7 @@ public final class RegionGenerator {
         for(Cell c:centers){
             try{sem.acquire();}catch(InterruptedException e){Thread.currentThread().interrupt();}
             int qi=c.q - qMin, ri=c.r - rMin;
-            double wxD=g.worldX(qi,ri); double wzD=g.worldZ(qi,ri);
+            double wxD=g.worldX(c.q, c.r); double wzD=g.worldZ(c.r);
             int wx=(int)Math.floor(wxD); int wz=(int)Math.floor(wzD);
             CompletableFuture<Void> f=new CompletableFuture<>();
             w.getChunkAtAsync(Math.floorDiv(wx,16), Math.floorDiv(wz,16), true)
@@ -217,17 +215,17 @@ public final class RegionGenerator {
         int[] dq={1,1,0,-1,-1,0};
         int[] dr={0,-1,-1,0,1,1};
 
-        double sum=0; int cnt=0;
+        List<Integer> slopes=new ArrayList<>();
         for(int q=0;q<g.w;q++)
             for(int r=0;r<g.h;r++)
                 for(int i=0;i<6;i++){
                     int nq=q+dq[i], nr=r+dr[i];
                     if(!g.inside(nq,nr))continue;
-                    sum+=Math.abs(g.height[q][r]-g.height[nq][nr]);
-                    cnt++;
+                    slopes.add(Math.abs(g.height[q][r]-g.height[nq][nr]));
                 }
-        int avg = (int)Math.round(sum / Math.max(1, cnt));
-        int threshold = Math.max(cfg.STEEP_SLOPE, avg + 2);
+        Collections.sort(slopes);
+        int median = slopes.isEmpty()?0:slopes.get(slopes.size()/2);
+        int threshold = Math.max(cfg.STEEP_SLOPE, median + 2);
 
         for(int q=0;q<g.w;q++)
             for(int r=0;r<g.h;r++){
@@ -371,13 +369,13 @@ public final class RegionGenerator {
         int[] dr={0,-1,-1,0,1,1};
         Cell start=cells.stream().min(Comparator.comparingInt(c->(c.q+c.r)*100000+c.q)).orElse(cells.get(0));
         int dir=0; List<Vector> ring=new ArrayList<>(cells.size()*6);
-        Set<Long> visited=new HashSet<>(cells.size()*6);
+        Set<Integer> visited=new HashSet<>(cells.size()*6);
         int maxSteps=cells.size()*(chaikinIter+12);
         int steps=0; int q=start.q,r=start.r;
         do{
-            long state=((long)(q & 0x1FFFFF) << 42) | ((long)(r & 0x1FFFFF) << 21) | (dir & 0x1F);
+            int state=Objects.hash(q,r,dir);
             if(!visited.add(state)||++steps>maxSteps) break;
-            ring.add(new Vector(g.worldX(q,r),0,g.worldZ(q,r)));
+            ring.add(new Vector(g.worldX(q+g.minQ,r+g.minR),0,g.worldZ(r+g.minR)));
             for(int i=0;i<6;i++){
                 int nd=(dir+5)%6; int nq=q+dq[nd], nr=r+dr[nd];
                 if(S.contains(((long)nq<<32)|(nr&0xffffffffL))){dir=nd;break;}
@@ -392,9 +390,19 @@ public final class RegionGenerator {
         if(pts.size()<3) return pts;
         List<Vector> res=new ArrayList<>(pts.size()*2);
         for(int i=0;i<pts.size();i++){
-            Vector p0=pts.get(i); Vector p1=pts.get((i+1)%pts.size());
-            res.add(p0.clone().multiply(0.75).add(p1.clone().multiply(0.25)));
-            res.add(p0.clone().multiply(0.25).add(p1.clone().multiply(0.75)));
+            Vector a=pts.get((i-1+pts.size())%pts.size());
+            Vector b=pts.get(i);
+            Vector c=pts.get((i+1)%pts.size());
+
+            Vector ab=b.clone().subtract(a); Vector bc=c.clone().subtract(b);
+            double denom=ab.length()*bc.length();
+            double angle=denom==0?0:Math.toDegrees(Math.acos(ab.dot(bc)/denom));
+            if(angle>175.0){
+                res.add(b.clone());
+                continue;
+            }
+            res.add(b.clone().multiply(0.75).add(c.clone().multiply(0.25)));
+            res.add(b.clone().multiply(0.25).add(c.clone().multiply(0.75)));
         }
         return res;
     }
