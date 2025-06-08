@@ -1,14 +1,26 @@
 enabled: false
 debug: false
 regions:
+  # Radius around spawn to process, blocks. Larger values dramatically
+  # increase generation time.
   worldRadius: 5000
+  # Height-map sampling step in blocks. Lower values give more precise
+  # regions but slow generation.
   sampleSpacing: 8
   terrainWeight: 1.0
   biomeWeight: 0.4
+  # Region size thresholds used when merging and splitting.
   minCells: 30
   maxCells: 3000
+  # Distance from shore kept when discarding ocean regions.
   coastBuffer: 50
+  # Chaikin smoothing iterations. More iterations produce smoother
+  # polygons but require extra processing time.
   chaikinIter: 3
+  # Limit for steps during boundary tracing expressed as multiplier of
+  # region cell count.
+  boundaryStepLimitFactor: 8
+  # Maximum simultaneously sampled chunks. Set to 0 to use CPU x2.
   maxParallelSamples: 0  # 0 => use CPU x2
 
 database:

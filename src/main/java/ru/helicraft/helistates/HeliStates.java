@@ -49,6 +49,8 @@ public final class HeliStates extends JavaPlugin {
         cfg.MAX_CELLS      = getConfig().getInt   ("regions.maxCells",       3000);
         cfg.COAST_BUFFER   = getConfig().getInt   ("regions.coastBuffer",      50);
         cfg.CHAIKIN_ITER   = getConfig().getInt   ("regions.chaikinIter",       3);
+        cfg.boundaryStepLimitFactor = getConfig().getInt(
+                "regions.boundaryStepLimitFactor", 8);
         cfg.maxParallelSamples = getConfig().getInt("regions.maxParallelSamples", 0);
 
         regionManager = new RegionManager(databaseManager, cfg);

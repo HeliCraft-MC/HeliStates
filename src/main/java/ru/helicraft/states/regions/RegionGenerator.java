@@ -75,6 +75,13 @@ public final class RegionGenerator {
 
         /** Итерации Chaikin. */
         public int CHAIKIN_ITER = 3;
+
+        /**
+         * Multiplier for boundary tracing step limit. Ring tracing stops after
+         * {@code cells.size() * boundaryStepLimitFactor} iterations to avoid
+         * runaway loops. Higher values are safer but may increase memory usage.
+         */
+        public int boundaryStepLimitFactor = 8;
     }
 
     /**
@@ -470,6 +477,10 @@ public final class RegionGenerator {
         List<Region> out = new ArrayList<>();
         for (var e : regCells.entrySet()) {
             List<Cell> cells = e.getValue();
+            if (HeliStates.DEBUG) {
+                LOG.info("[DEBUG] buildRegionObjects: id=" + e.getKey() +
+                        " cells=" + cells.size());
+            }
             /* Считаем площадь и доминирующий биом */
             Map<Biome,Integer> cnt = new HashMap<>();
             int area = 0;
@@ -499,6 +510,10 @@ public final class RegionGenerator {
             /* Сглаживаем Chaikin-ом */
             for (int i = 0; i < cfg.CHAIKIN_ITER; i++) ring = chaikin(ring);
 
+            if (HeliStates.DEBUG) {
+                LOG.info("[DEBUG] region " + e.getKey() + " ring vertices=" + ring.size());
+            }
+
             out.add(new Region(UUID.randomUUID(), ring, area, dom));
         }
         return out;
@@ -523,29 +538,51 @@ public final class RegionGenerator {
     /* ---------- Грубый обход края (Marching Squares lite) ---------- */
 
     private List<Vector> traceBoundary(List<Cell> cells, Grid g) {
-        Set<Long> S = new HashSet<>(cells.size()*2);
-        cells.forEach(c -> S.add(((long)c.gx<<32)| (c.gz&0xffffffffL)));
+        if (HeliStates.DEBUG) {
+            LOG.info("[DEBUG] traceBoundary: cells=" + cells.size());
+        }
+
+        Set<Long> S = new HashSet<>(cells.size() * 2);
+        cells.forEach(c -> S.add(((long) c.gx << 32) | (c.gz & 0xffffffffL)));
 
         int[] dx = {1, 0, -1, 0}, dz = {0, 1, 0, -1};
         Cell start = cells.stream()
                 .min(Comparator.comparingInt(c -> c.gx * 100000 + c.gz))
                 .orElse(cells.get(0));
         int dir = 0;
-        List<Vector> ring = new ArrayList<>();
+        List<Vector> ring = new ArrayList<>(cells.size() * 4);
+        Set<Long> visited = new HashSet<>(cells.size() * 4);
+        int maxSteps = cells.size() * cfg.boundaryStepLimitFactor;
+        int steps = 0;
         int x = start.gx, z = start.gz;
         int spacing = g.spacing;
 
         do {
+            long state = (((long) x & 0xffffffffL) << 34)
+                    | ((long) (z & 0xffffffffL) << 2)
+                    | (dir & 0x3);
+            if (!visited.add(state) || ++steps > maxSteps) {
+                LOG.warning("[DEBUG] traceBoundary: loop detected or too many steps (" + steps + ")");
+                break;
+            }
+
             ring.add(new Vector(x * spacing, 0, z * spacing));
             /* Поворачиваем пока слева внутри */
             for (int i = 0; i < 4; i++) {
                 int nd = (dir + 3) % 4;
                 int nx = x + dx[nd], nz = z + dz[nd];
-                if (S.contains(((long)nx<<32)|(nz&0xffffffffL))) { dir = nd; break; }
+                if (S.contains(((long) nx << 32) | (nz & 0xffffffffL))) {
+                    dir = nd; break;
+                }
                 dir = (dir + 1) % 4;
             }
-            x += dx[dir]; z += dz[dir];
+            x += dx[dir];
+            z += dz[dir];
         } while (!(x == start.gx && z == start.gz && ring.size() > 1));
+
+        if (HeliStates.DEBUG) {
+            LOG.info("[DEBUG] traceBoundary: ring size=" + ring.size());
+        }
 
         return ring;
     }
