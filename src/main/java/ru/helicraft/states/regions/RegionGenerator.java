@@ -74,7 +74,7 @@ public final class RegionGenerator {
         public int COAST_BUFFER = 50;
 
         /** Итерации Chaikin. */
-        public int CHAIKIN_ITER = 3;
+        public int CHAIKIN_ITER = 5;
 
         /**
          * Multiplier for boundary tracing step limit. Ring tracing stops after
@@ -103,15 +103,18 @@ public final class RegionGenerator {
 
     private static final class Grid {
         final int w, h, spacing;
+        final int minX, minZ;
         final double[][] height;
         final Biome[][] biome;
         final int[][] basin;          // id водосбора
         final boolean[][] ridge;      // true, если принадлежит хребту
 
-        Grid(int w, int h, int spacing) {
+        Grid(int w, int h, int spacing, int minX, int minZ) {
             this.w = w;
             this.h = h;
             this.spacing = spacing;
+            this.minX = minX;
+            this.minZ = minZ;
             height = new double[w][h];
             biome  = new Biome[w][h];
             basin  = new int[w][h];
@@ -177,7 +180,7 @@ public final class RegionGenerator {
         int minX    = -r, minZ = -r, maxX = r, maxZ = r;
         int gw      = (maxX - minX) / spacing + 1;
         int gh      = (maxZ - minZ) / spacing + 1;
-        Grid g      = new Grid(gw, gh, spacing);
+        Grid g      = new Grid(gw, gh, spacing, minX, minZ);
 
         LOG.info("Sampling heightmap...");
         long tStart = System.currentTimeMillis();
@@ -509,12 +512,17 @@ public final class RegionGenerator {
             List<Vector> ring = traceBoundary(cells, g);
             /* Сглаживаем Chaikin-ом */
             for (int i = 0; i < cfg.CHAIKIN_ITER; i++) ring = chaikin(ring);
+            ring = dedup(ring);
 
             if (HeliStates.DEBUG) {
                 LOG.info("[DEBUG] region " + e.getKey() + " ring vertices=" + ring.size());
             }
 
-            out.add(new Region(UUID.randomUUID(), ring, area, dom));
+            if (ring.size() >= 3) {
+                out.add(new Region(UUID.randomUUID(), ring, area, dom));
+            } else if (HeliStates.DEBUG) {
+                LOG.info("[DEBUG] skipping region " + e.getKey() + " due to insufficient vertices");
+            }
         }
         return out;
     }
@@ -531,6 +539,19 @@ public final class RegionGenerator {
             Vector p1 = pts.get((i + 1) % pts.size());
             res.add(p0.clone().multiply(0.75).add(p1.clone().multiply(0.25)));
             res.add(p0.clone().multiply(0.25).add(p1.clone().multiply(0.75)));
+        }
+        return res;
+    }
+
+    private static List<Vector> dedup(List<Vector> pts) {
+        if (pts.size() < 2) return pts;
+        List<Vector> res = new ArrayList<>(pts.size());
+        Vector prev = null;
+        for (Vector v : pts) {
+            if (prev == null || !prev.equals(v)) {
+                res.add(v);
+                prev = v;
+            }
         }
         return res;
     }
@@ -556,6 +577,8 @@ public final class RegionGenerator {
         int steps = 0;
         int x = start.gx, z = start.gz;
         int spacing = g.spacing;
+        int offX = g.minX;
+        int offZ = g.minZ;
 
         do {
             long state = (((long) x & 0xffffffffL) << 34)
@@ -566,7 +589,7 @@ public final class RegionGenerator {
                 break;
             }
 
-            ring.add(new Vector(x * spacing, 0, z * spacing));
+            ring.add(new Vector(offX + x * spacing, 0, offZ + z * spacing));
             /* Поворачиваем пока слева внутри */
             for (int i = 0; i < 4; i++) {
                 int nd = (dir + 3) % 4;

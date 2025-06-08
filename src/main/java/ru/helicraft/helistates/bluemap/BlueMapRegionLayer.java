@@ -1,12 +1,15 @@
 package ru.helicraft.helistates.bluemap;
 
 import com.flowpowered.math.vector.Vector2d; // ← Flow-Math!
+import com.flowpowered.math.vector.Vector3d;
 import de.bluecolored.bluemap.api.BlueMapAPI;
 import de.bluecolored.bluemap.api.BlueMapMap;
 import de.bluecolored.bluemap.api.markers.MarkerSet;
 import de.bluecolored.bluemap.api.markers.ShapeMarker;
 import de.bluecolored.bluemap.api.math.Color;
 import de.bluecolored.bluemap.api.math.Shape;
+import org.bukkit.Bukkit;
+import org.bukkit.World;
 import ru.helicraft.helistates.region.RegionManager;
 import ru.helicraft.states.regions.RegionGenerator;
 
@@ -28,7 +31,10 @@ public final class BlueMapRegionLayer {
             .defaultHidden(false)
             .build();
 
+    private final RegionManager regionManager;
+
     public BlueMapRegionLayer(RegionManager regionManager) {
+        this.regionManager = regionManager;
 
         /* реагируем на изменения в RegionManager */
         regionManager.addUpdateListener(this::renderRegions);
@@ -47,20 +53,32 @@ public final class BlueMapRegionLayer {
 
     /* перерисовать все регионы */
     private void renderRegions(List<RegionGenerator.Region> regs) {
-        set.getMarkers().clear();
-        regs.forEach(r -> set.getMarkers().put(
-                r.id().toString(), buildMarker(r)
-        ));
+        Bukkit.getScheduler().runTask(ru.helicraft.helistates.HeliStates.getInstance(), () -> {
+            set.getMarkers().clear();
+            regs.forEach(r -> {
+                ShapeMarker m = buildMarker(r);
+                if (m != null) set.getMarkers().put(r.id().toString(), m);
+            });
+        });
     }
 
     private ShapeMarker buildMarker(RegionGenerator.Region r) {
+        World world = regionManager.getWorld();
+        if (world == null) return null;
+
         List<Vector2d> poly = r.outline().stream()
                 .map(v -> new Vector2d(v.getBlockX(), v.getBlockZ()))
                 .toList();
+        if (poly.size() < 3) return null;
+
+        double cx = poly.stream().mapToDouble(Vector2d::getX).average().orElse(0);
+        double cz = poly.stream().mapToDouble(Vector2d::getY).average().orElse(0);
+        int y = world.getHighestBlockYAt((int) cx, (int) cz) + 1;
 
         return ShapeMarker.builder()
                 .label("Незанятый регион")
-                .shape(new Shape(poly), 64f) // y-координата
+                .position(new Vector3d(cx, y, cz))
+                .shape(new Shape(poly), (float) y)
                 .fillColor(FILL)
                 .lineColor(LINE)
                 .lineWidth(1)

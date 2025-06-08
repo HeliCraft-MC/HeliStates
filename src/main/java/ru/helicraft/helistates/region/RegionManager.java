@@ -46,6 +46,8 @@ public class RegionManager {
 
     @Getter
     private volatile List<RegionGenerator.Region> regions = Collections.emptyList();
+    @Getter
+    private volatile World world;
 
     /* ---------- ctor ---------- */
     public RegionManager(DatabaseManager db, RegionGenerator.Config cfg) {
@@ -64,6 +66,7 @@ public class RegionManager {
 
     /* ---------- Загрузка ---------- */
     public void loadRegions(World world) {
+        this.world = world;
         List<RegionGenerator.Region> list = new ArrayList<>();
         try (PreparedStatement ps =
                      databaseManager.getConnection().prepareStatement(SELECT_SQL)) {
@@ -89,6 +92,7 @@ public class RegionManager {
     public void generateAndSave(World world, Consumer<Integer> onProgress, Runnable whenDone) {
         if (HeliStates.DEBUG)
             LOG.info("[DEBUG] starting generation for world " + world.getName());
+        this.world = world;
         generator.generate(world, new RegionGenerator.Callback() {
 
             @Override public void onProgress(int p){
