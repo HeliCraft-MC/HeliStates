@@ -3,6 +3,8 @@ package ru.helicraft.helistates;
 import lombok.Getter;
 import org.bukkit.Bukkit;
 import org.bukkit.World;
+import org.bukkit.block.Biome;
+import java.util.Locale;
 import org.bukkit.plugin.java.JavaPlugin;
 import ru.helicraft.helistates.bluemap.BlueMapRegionLayer; // ← new
 import ru.helicraft.helistates.command.HeliCommand;
@@ -41,17 +43,27 @@ public final class HeliStates extends JavaPlugin {
 
         /* Region-генератор */
         RegionGenerator.Config cfg = new RegionGenerator.Config();
-        cfg.radiusBlocks   = getConfig().getInt   ("regions.worldRadius",    5000);
-        cfg.sampleSpacing  = getConfig().getInt   ("regions.sampleSpacing",     8);
-        cfg.TERRAIN_WEIGHT = getConfig().getDouble("regions.terrainWeight",   1.0);
-        cfg.BIOME_WEIGHT   = getConfig().getDouble("regions.biomeWeight",     0.4);
-        cfg.MIN_CELLS      = getConfig().getInt   ("regions.minCells",         30);
-        cfg.MAX_CELLS      = getConfig().getInt   ("regions.maxCells",       3000);
-        cfg.COAST_BUFFER   = getConfig().getInt   ("regions.coastBuffer",      50);
-        cfg.CHAIKIN_ITER   = getConfig().getInt   ("regions.chaikinIter",       3);
-        cfg.boundaryStepLimitFactor = getConfig().getInt(
-                "regions.boundaryStepLimitFactor", 8);
+        cfg.radiusBlocks   = getConfig().getInt("regions.worldRadius",    5000);
+        cfg.sampleSpacing  = getConfig().getInt("regions.sampleSpacing",     8);
+        cfg.STEEP_SLOPE    = getConfig().getInt("regions.steepSlope",        10);
+        cfg.MIN_CELLS      = getConfig().getInt("regions.minCells",        400);
+        cfg.MAX_CELLS      = getConfig().getInt("regions.maxCells",       3000);
+        cfg.CHAIKIN_ITER   = getConfig().getInt("regions.chaikinIter",      2);
         cfg.maxParallelSamples = getConfig().getInt("regions.maxParallelSamples", 0);
+
+        var sec = getConfig().getConfigurationSection("regions.similarBiomes");
+        if (sec != null) {
+            for (String group : sec.getKeys(false)) {
+                for (String name : sec.getStringList(group)) {
+                    String up = name.toUpperCase(Locale.ROOT);
+                    try {
+                        cfg.biomeGroups.put(Biome.valueOf(up), group);
+                    } catch (IllegalArgumentException ex) {
+                        getLogger().warning("Unknown biome '" + name + "' in group '" + group + "'");
+                    }
+                }
+            }
+        }
 
         regionManager = new RegionManager(databaseManager, cfg);
         new BlueMapRegionLayer(regionManager); // ← интеграция с картой

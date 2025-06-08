@@ -2,4 +2,7 @@
 
 Simple plugin for generating geographic regions. Configure in `config.yml`.
 
-`regions.maxParallelSamples` controls how many chunks are sampled concurrently. Set to 0 to use `CPU * 2`.
+Key settings include:
+- `steepSlope` – height difference that forms a barrier between regions.
+- `similarBiomes` – groups of biome names treated as the same when building borders.
+- `maxParallelSamples` – how many chunks are sampled concurrently (0 uses `CPU * 2`).
