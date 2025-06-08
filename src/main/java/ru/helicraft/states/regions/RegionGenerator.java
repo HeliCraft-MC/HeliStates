@@ -30,7 +30,7 @@ public final class RegionGenerator {
     /* ---------- Публичные типы ---------- */
     public record Region(UUID id,
                          List<Vector> outline,
-                         int areaBlocks,
+                         double areaBlocks,
                          Biome dominantBiome) { }
 
     public interface Callback {
@@ -72,23 +72,39 @@ public final class RegionGenerator {
     }
 
     /* ---------- Внутренние структуры ---------- */
-    private record Cell(int gx, int gz) { }
+    /** Hex cell in axial (q,r) coordinates */
+    private record Cell(int q, int r) { }
 
     private static final class Grid {
         final int w, h, spacing;
-        final int minX, minZ;
+        final int minQ, minR;
+        /** hex side length in blocks */
+        final double hexSize;
         final int[][]   height;
         final Biome[][] biome;
         final boolean[][] ridge;
 
-        Grid(int w, int h, int spacing, int minX, int minZ) {
+        Grid(int w, int h, int spacing, int minQ, int minR, double hexSize) {
             this.w = w; this.h = h; this.spacing = spacing;
-            this.minX = minX; this.minZ = minZ;
+            this.minQ = minQ; this.minR = minR;
+            this.hexSize = hexSize;
             height = new int[w][h];
             biome  = new Biome[w][h];
             ridge  = new boolean[w][h];
         }
-        boolean inside(int x,int z){return x>=0&&z>=0&&x<w&&z<h;}
+        boolean inside(int q,int r){return q>=0&&r>=0&&q<w&&r<h;}
+
+        /** World X coordinate of cell center */
+        double worldX(int q, int r){
+            int aq=q+minQ, ar=r+minR;
+            return Math.sqrt(3.0) * hexSize * (aq + ar/2.0);
+        }
+
+        /** World Z coordinate of cell center */
+        double worldZ(int q, int r){
+            int aq=q+minQ, ar=r+minR;
+            return 1.5 * hexSize * ar;
+        }
     }
 
     /* ---------- Поля ---------- */
@@ -126,32 +142,54 @@ public final class RegionGenerator {
 
     /* ---------- 1. Выборка высот и биомов ---------- */
     private Grid sampleWorld(World w, Callback cb){
-        int r = cfg.radiusBlocks, s = cfg.sampleSpacing;
-        int minX=-r,minZ=-r,maxX=r,maxZ=r;
-        int gw=(maxX-minX)/s+1, gh=(maxZ-minZ)/s+1;
-        Grid g=new Grid(gw,gh,s,minX,minZ);
+        int radius = cfg.radiusBlocks;
+        int s = cfg.sampleSpacing;
+        // side length of hex cell
+        double hexSize = s / 2.0;
 
-        AtomicInteger done=new AtomicInteger(); int total=gw*gh;
+        List<Cell> centers = new ArrayList<>();
+        int qMin=Integer.MAX_VALUE,qMax=Integer.MIN_VALUE;
+        int rMin=Integer.MAX_VALUE,rMax=Integer.MIN_VALUE;
+
+        int range = (int)Math.ceil(radius / s) * 2 + 2;
+        for(int q=-range;q<=range;q++)
+            for(int r=-range;r<=range;r++){
+                double wx=Math.sqrt(3.0) * hexSize * (q + r/2.0);
+                double wz=1.5 * hexSize * r;
+                if(Math.hypot(wx,wz) <= radius){
+                    centers.add(new Cell(q,r));
+                    if(q<qMin)qMin=q; if(q>qMax)qMax=q;
+                    if(r<rMin)rMin=r; if(r>rMax)rMax=r;
+                }
+            }
+
+        int gw=qMax - qMin + 1;
+        int gh=rMax - rMin + 1;
+        Grid g=new Grid(gw,gh,s,qMin,rMin,hexSize);
+
+        AtomicInteger done=new AtomicInteger(); int total=centers.size();
         int concurrency = computeConcurrency(cfg.maxParallelSamples, Runtime.getRuntime().availableProcessors());
         Semaphore sem=new Semaphore(concurrency, true);
         List<CompletableFuture<Void>> futures=new ArrayList<>(total);
 
-        for(int gx=0;gx<gw;gx++)for(int gz=0;gz<gh;gz++){
+        for(Cell c:centers){
             try{sem.acquire();}catch(InterruptedException e){Thread.currentThread().interrupt();}
-            int cellX=gx,cellZ=gz,wx=minX+cellX*s,wz=minZ+cellZ*s;
+            int qi=c.q - qMin, ri=c.r - rMin;
+            double wxD=g.worldX(qi,ri); double wzD=g.worldZ(qi,ri);
+            int wx=(int)Math.floor(wxD); int wz=(int)Math.floor(wzD);
             CompletableFuture<Void> f=new CompletableFuture<>();
-            w.getChunkAtAsync(wx>>4, wz>>4, true)
+            w.getChunkAtAsync(Math.floorDiv(wx,16), Math.floorDiv(wz,16), true)
                 .orTimeout(30, TimeUnit.SECONDS)
                 .thenAccept(ch->{
                     try{
                         ChunkSnapshot snap=ch.getChunkSnapshot(true,true,true);
-                        Biome b=snap.getBiome(wx&15,64,wz&15);
-                        g.biome[cellX][cellZ]=b;
+                        Biome b=snap.getBiome(Math.floorMod(wx,16),64,Math.floorMod(wz,16));
+                        g.biome[qi][ri]=b;
                         if(isWater(b)){
-                            g.height[cellX][cellZ]=w.getMaxHeight()+100;
-                            g.ridge[cellX][cellZ]=true;
+                            g.height[qi][ri]=w.getMaxHeight()+100;
+                            g.ridge[qi][ri]=true;
                         }else{
-                            g.height[cellX][cellZ]=snap.getHighestBlockYAt(wx&15,wz&15);
+                            g.height[qi][ri]=snap.getHighestBlockYAt(Math.floorMod(wx,16),Math.floorMod(wz,16));
                         }
                     }catch(Throwable ex){LOG.log(Level.SEVERE,"sample error",ex);}finally{
                         int cur=done.incrementAndGet();
@@ -160,7 +198,8 @@ public final class RegionGenerator {
                     }
                 })
                 .exceptionally(ex->{
-                    LOG.log(Level.SEVERE,"chunk load timeout",ex);
+                    LOG.log(Level.SEVERE,
+                            "chunk load failed: " + ex.getClass().getSimpleName(), ex);
                     int cur=done.incrementAndGet();
                     if(cur%Math.max(1,total/20)==0)cb.onProgress(cur*100/total);
                     sem.release(); f.complete(null);
@@ -175,31 +214,32 @@ public final class RegionGenerator {
 
     /* ---------- 2. Построение барьерной маски ---------- */
     private void buildBarriers(Grid g){
-        int[] dx={1,-1,0,0, 1,1,-1,-1};
-        int[] dz={0,0,1,-1,1,-1,1,-1};
+        int[] dq={1,1,0,-1,-1,0};
+        int[] dr={0,-1,-1,0,1,1};
 
         double sum=0; int cnt=0;
-        for(int x=0;x<g.w;x++)
-            for(int z=0;z<g.h;z++)
-                for(int i=0;i<8;i++){
-                    int nx=x+dx[i],nz=z+dz[i];
-                    if(!g.inside(nx,nz))continue;
-                    sum+=Math.abs(g.height[x][z]-g.height[nx][nz]);
+        for(int q=0;q<g.w;q++)
+            for(int r=0;r<g.h;r++)
+                for(int i=0;i<6;i++){
+                    int nq=q+dq[i], nr=r+dr[i];
+                    if(!g.inside(nq,nr))continue;
+                    sum+=Math.abs(g.height[q][r]-g.height[nq][nr]);
                     cnt++;
                 }
-        int threshold=Math.max(cfg.STEEP_SLOPE,(int)Math.round((sum/Math.max(1,cnt))*1.5));
+        int avg = (int)Math.round(sum / Math.max(1, cnt));
+        int threshold = Math.max(cfg.STEEP_SLOPE, avg + 2);
 
-        for(int x=0;x<g.w;x++)
-            for(int z=0;z<g.h;z++){
-                if(g.ridge[x][z])continue;
-                for(int i=0;i<8;i++){
-                    int nx=x+dx[i],nz=z+dz[i];
-                    if(!g.inside(nx,nz))continue;
-                    if(!similarBiome(g.biome[x][z],g.biome[nx][nz])){
-                        g.ridge[x][z]=g.ridge[nx][nz]=true; continue;
+        for(int q=0;q<g.w;q++)
+            for(int r=0;r<g.h;r++){
+                if(g.ridge[q][r])continue;
+                for(int i=0;i<6;i++){ 
+                    int nq=q+dq[i], nr=r+dr[i];
+                    if(!g.inside(nq,nr))continue;
+                    if(!similarBiome(g.biome[q][r],g.biome[nq][nr])){
+                        g.ridge[q][r]=g.ridge[nq][nr]=true; continue;
                     }
-                    if(Math.abs(g.height[x][z]-g.height[nx][nz])>=threshold){
-                        g.ridge[x][z]=g.ridge[nx][nz]=true;
+                    if(Math.abs(g.height[q][r]-g.height[nq][nr])>=threshold){
+                        g.ridge[q][r]=g.ridge[nq][nr]=true;
                     }
                 }
             }
@@ -211,19 +251,20 @@ public final class RegionGenerator {
         for(int[] row:region)Arrays.fill(row,-1);
         Map<Integer,List<Cell>> regCells=new HashMap<>();
         int id=0;
-        int[] dx={1,-1,0,0},dz={0,0,1,-1};
-        for(int x=0;x<g.w;x++)
-            for(int z=0;z<g.h;z++) if(region[x][z]==-1 && !g.ridge[x][z]){
-                Deque<Cell> q=new ArrayDeque<>();
-                q.add(new Cell(x,z)); List<Cell> list=new ArrayList<>();
-                region[x][z]=id;
-                while(!q.isEmpty()){
-                    Cell c=q.poll(); list.add(c);
-                    for(int i=0;i<4;i++){
-                        int nx=c.gx+dx[i],nz=c.gz+dz[i];
-                        if(!g.inside(nx,nz)||g.ridge[nx][nz])continue;
-                        if(region[nx][nz]!=-1)continue;
-                        region[nx][nz]=id; q.add(new Cell(nx,nz));
+        int[] dq={1,1,0,-1,-1,0};
+        int[] dr={0,-1,-1,0,1,1};
+        for(int q=0;q<g.w;q++)
+            for(int r=0;r<g.h;r++) if(region[q][r]==-1 && !g.ridge[q][r]){
+                Deque<Cell> qCells=new ArrayDeque<>();
+                qCells.add(new Cell(q,r)); List<Cell> list=new ArrayList<>();
+                region[q][r]=id;
+                while(!qCells.isEmpty()){
+                    Cell c=qCells.poll(); list.add(c);
+                    for(int i=0;i<6;i++){ 
+                        int nq=c.q+dq[i], nr=c.r+dr[i];
+                        if(!g.inside(nq,nr)||g.ridge[nq][nr])continue;
+                        if(region[nq][nr]!=-1)continue;
+                        region[nq][nr]=id; qCells.add(new Cell(nq,nr));
                     }
                 }
                 regCells.put(id,list); id++;
@@ -246,19 +287,20 @@ public final class RegionGenerator {
                 if(e.getValue().size()>=cfg.MIN_CELLS) continue;
                 int id=e.getKey();
                 Map<Integer,Integer> border=new HashMap<>();
+                int[] dq={1,1,0,-1,-1,0};
+                int[] dr={0,-1,-1,0,1,1};
                 for(Cell c:e.getValue()){
-                    for(int dx1=-1;dx1<=1;dx1++)
-                        for(int dz1=-1;dz1<=1;dz1++){
-                            int nx=c.gx+dx1,nz=c.gz+dz1;
-                            if(!g.inside(nx,nz))continue;
-                            int rid=region[nx][nz];
-                            if(rid<0||rid==id)continue;
-                            border.merge(rid,1,Integer::sum);
-                        }
+                    for(int i=0;i<6;i++){
+                        int nq=c.q+dq[i], nr=c.r+dr[i];
+                        if(!g.inside(nq,nr))continue;
+                        int rid=region[nq][nr];
+                        if(rid<0||rid==id)continue;
+                        border.merge(rid,1,Integer::sum);
+                    }
                 }
                 if(border.isEmpty())continue;
                 int tgt=Collections.max(border.entrySet(),Map.Entry.comparingByValue()).getKey();
-                e.getValue().forEach(c->region[c.gx][c.gz]=tgt);
+                e.getValue().forEach(c->region[c.q][c.r]=tgt);
                 reg.computeIfAbsent(tgt,k->new ArrayList<>()).addAll(e.getValue());
                 it.remove();
                 merged=true;
@@ -274,10 +316,10 @@ public final class RegionGenerator {
             for(var e:new ArrayList<>(reg.entrySet())){
                 if(e.getValue().size()<=cfg.MAX_CELLS) continue;
                 List<Cell> list=e.getValue();
-                list.sort(Comparator.comparingInt(c->c.gx+c.gz));
+                list.sort(Comparator.comparingInt(c->c.q+c.r));
                 List<Cell> sub=list.subList(0,list.size()/2);
                 int newId=reg.keySet().stream().mapToInt(i->i).max().orElse(0)+1;
-                sub.forEach(c->{region[c.gx][c.gz]=newId;});
+                sub.forEach(c->{region[c.q][c.r]=newId;});
                 reg.put(newId,new ArrayList<>(sub));
                 list.removeAll(sub);
                 split=true;
@@ -291,19 +333,22 @@ public final class RegionGenerator {
         for(var e:regCells.entrySet()){
             List<Cell> cells=e.getValue();
             Map<Biome,Integer> cnt=new HashMap<>();
-            int area=0;
+            double cellArea = 3.0 * Math.sqrt(3.0) / 2.0 * g.hexSize * g.hexSize;
+            double area=0;
             for(Cell c:cells){
-                cnt.merge(g.biome[c.gx][c.gz],1,Integer::sum);
-                area+=cfg.sampleSpacing*cfg.sampleSpacing;
+                cnt.merge(g.biome[c.q][c.r],1,Integer::sum);
+                area+=cellArea;
             }
             Biome dom=Collections.max(cnt.entrySet(),Map.Entry.comparingByValue()).getKey();
             if(isWater(dom)){
                 boolean nearLand=cells.stream().anyMatch(c->{
-                    for(int dx=-cfg.sampleSpacing*2;dx<=cfg.sampleSpacing*2;dx+=g.spacing)
-                        for(int dz=-cfg.sampleSpacing*2;dz<=cfg.sampleSpacing*2;dz+=g.spacing){
-                            int nx=c.gx+dx/g.spacing,nz=c.gz+dz/g.spacing;
-                            if(!g.inside(nx,nz))continue;
-                            if(!isWater(g.biome[nx][nz]))return true;
+                    int[] dq={1,1,0,-1,-1,0};
+                    int[] dr={0,-1,-1,0,1,1};
+                    for(int d=0;d<6;d++)
+                        for(int k=1;k<=2;k++){
+                            int nq=c.q+dq[d]*k, nr=c.r+dr[d]*k;
+                            if(!g.inside(nq,nr))continue;
+                            if(!isWater(g.biome[nq][nr]))return true;
                         }
                     return false;
                 });
@@ -321,24 +366,25 @@ public final class RegionGenerator {
 
     private static List<Vector> traceBoundary(List<Cell> cells,Grid g,int chaikinIter){
         Set<Long> S=new HashSet<>(cells.size()*2);
-        cells.forEach(c->S.add(((long)c.gx<<32)|(c.gz&0xffffffffL)));
-        int[] dx={1,0,-1,0},dz={0,1,0,-1};
-        Cell start=cells.stream().min(Comparator.comparingInt(c->c.gx*100000+c.gz)).orElse(cells.get(0));
-        int dir=0; List<Vector> ring=new ArrayList<>(cells.size()*4);
-        Set<Long> visited=new HashSet<>(cells.size()*4);
-        int maxSteps=cells.size()*(chaikinIter+8);
-        int steps=0; int x=start.gx,z=start.gz; int spacing=g.spacing; int offX=g.minX,offZ=g.minZ;
+        cells.forEach(c->S.add(((long)c.q<<32)|(c.r&0xffffffffL)));
+        int[] dq={1,1,0,-1,-1,0};
+        int[] dr={0,-1,-1,0,1,1};
+        Cell start=cells.stream().min(Comparator.comparingInt(c->(c.q+c.r)*100000+c.q)).orElse(cells.get(0));
+        int dir=0; List<Vector> ring=new ArrayList<>(cells.size()*6);
+        Set<Long> visited=new HashSet<>(cells.size()*6);
+        int maxSteps=cells.size()*(chaikinIter+12);
+        int steps=0; int q=start.q,r=start.r;
         do{
-            long state=(((long)x&0xffffffffL)<<34)|((long)(z&0xffffffffL)<<2)|(dir&0x3);
+            long state=((long)(q & 0x1FFFFF) << 42) | ((long)(r & 0x1FFFFF) << 21) | (dir & 0x1F);
             if(!visited.add(state)||++steps>maxSteps) break;
-            ring.add(new Vector(offX+x*spacing,0,offZ+z*spacing));
-            for(int i=0;i<4;i++){
-                int nd=(dir+3)%4; int nx=x+dx[nd],nz=z+dz[nd];
-                if(S.contains(((long)nx<<32)|(nz&0xffffffffL))){dir=nd;break;}
-                dir=(dir+1)%4;
+            ring.add(new Vector(g.worldX(q,r),0,g.worldZ(q,r)));
+            for(int i=0;i<6;i++){
+                int nd=(dir+5)%6; int nq=q+dq[nd], nr=r+dr[nd];
+                if(S.contains(((long)nq<<32)|(nr&0xffffffffL))){dir=nd;break;}
+                dir=(dir+1)%6;
             }
-            x+=dx[dir]; z+=dz[dir];
-        }while(!(x==start.gx&&z==start.gz&&ring.size()>1));
+            q+=dq[dir]; r+=dr[dir];
+        }while(!(q==start.q&&r==start.r&&ring.size()>1));
         return ring;
     }
 

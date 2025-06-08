@@ -76,7 +76,7 @@ public class RegionManager {
                 while (rs.next()) {
                     UUID  id   = UUID.fromString(rs.getString("id"));
                     Biome bio  = org.bukkit.Registry.BIOME.get(org.bukkit.NamespacedKey.minecraft(rs.getString("biome").toLowerCase()));
-                    int   area = rs.getInt("area");
+                    double area = rs.getInt("area");
                     List<Vector> outline = parseOutline(rs.getString("outline"));
                     list.add(new RegionGenerator.Region(id, outline, area, bio));
                 }
@@ -138,7 +138,7 @@ public class RegionManager {
                 ps.setString(1, r.id().toString());
                 ps.setString(2, world.getName());
                 ps.setString(3, r.dominantBiome().toString());
-                ps.setInt   (4, r.areaBlocks());
+                ps.setInt   (4, (int)Math.round(r.areaBlocks()));
                 ps.setString(5, outlineToString(r.outline()));
                 ps.setInt   (6, b.minX); ps.setInt(7, b.minZ);
                 ps.setInt   (8, b.maxX); ps.setInt(9, b.maxZ);
