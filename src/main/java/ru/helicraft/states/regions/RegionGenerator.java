@@ -558,7 +558,7 @@ public final class RegionGenerator {
         int spacing = g.spacing;
 
         do {
-            long state = (((long) x & 0xffffffffL) << 32)
+            long state = (((long) x & 0xffffffffL) << 34)
                     | ((long) (z & 0xffffffffL) << 2)
                     | (dir & 0x3);
             if (!visited.add(state) || ++steps > maxSteps) {
